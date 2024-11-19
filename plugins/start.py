@@ -166,26 +166,39 @@ async def start_command(client: Client, message: Message):
 #         disable_web_page_preview=True
 #     )
 
+# @Bot.on_message(filters.command('users') & filters.private & filters.user(ADMINS))
+# async def get_users(client: Bot, message: Message):
+#     msg = await client.send_message(chat_id=message.chat.id, text=f"Processing...")
+
+#     users = await db.full_userbase()
+#     await msg.edit(f"{len(users)} Users Are Using This Bot")
+
 @Bot.on_message(filters.command('users') & filters.private & filters.user(ADMINS))
 async def get_users(client: Bot, message: Message):
-    msg = await client.send_message(chat_id=message.chat.id, text=f"Processing...")
+    msg = await client.send_message(chat_id=message.chat.id, text="Processing...")
 
-    users = await db.full_userbase()
-    await msg.edit(f"{len(users)} Users Are Using This Bot")
+    try:
+        # Fetch all user IDs from the database
+        users = await db.full_userbase()
+        user_count = len(users)
 
+        # Update the message with the count
+        await msg.edit(f"✅ {user_count} Users Are Using This Bot")
+    except Exception as e:
+        # Handle potential errors
+        print(f"Error fetching user data: {e}")
+        await msg.edit("❌ Failed to fetch user data. Please try again later.")
 
 @Bot.on_message(filters.private & filters.command('broadcast') & filters.user(ADMINS))
 async def send_text(client: Bot, message: Message):
     if message.reply_to_message:
+        print(f'Broadcast hit me')
         query = await db.full_userbase()
         broadcast_msg = message.reply_to_message
-        total = 0
-        successful = 0
-        blocked = 0
-        deleted = 0
-        unsuccessful = 0
+        total, successful, blocked, deleted, unsuccessful = 0, 0, 0, 0, 0
+
+        pls_wait = await message.reply("<i>Broadcasting Message... This will Take Some Time</i>")
         
-        pls_wait = await message.reply("<i>Broadcasting Message.. This will Take Some Time</i>")
         for chat_id in query:
             try:
                 await broadcast_msg.copy(chat_id)
@@ -203,9 +216,12 @@ async def send_text(client: Bot, message: Message):
             except Exception as e:
                 print(f"Failed to send message to {chat_id}: {e}")
                 unsuccessful += 1
-                pass
             total += 1
-        
+
+            # Periodic update every 100 messages
+            if total % 100 == 0:
+                await pls_wait.edit(f"<i>Broadcasting...</i>\n\n<b>Total Processed:</b> <code>{total}</code>")
+
         status = f"""<b><u>Broadcast Completed</u></b>
 
 <b>Total Users :</b> <code>{total}</code>
@@ -217,9 +233,57 @@ async def send_text(client: Bot, message: Message):
         return await pls_wait.edit(status)
 
     else:
-        msg = await message.reply(f"Use This Command As A Reply To Any Telegram Message Without Any Spaces.")
+        msg = await message.reply("Use this command as a reply to any Telegram message.")
         await asyncio.sleep(8)
         await msg.delete()
+
+
+# @Bot.on_message(filters.private & filters.command('broadcast') & filters.user(ADMINS))
+# async def send_text(client: Bot, message: Message):
+#     if message.reply_to_message:
+#         query = await db.full_userbase()
+#         broadcast_msg = message.reply_to_message
+#         total = 0
+#         successful = 0
+#         blocked = 0
+#         deleted = 0
+#         unsuccessful = 0
+        
+#         pls_wait = await message.reply("<i>Broadcasting Message.. This will Take Some Time</i>")
+#         for chat_id in query:
+#             try:
+#                 await broadcast_msg.copy(chat_id)
+#                 successful += 1
+#             except FloodWait as e:
+#                 await asyncio.sleep(e.x)
+#                 await broadcast_msg.copy(chat_id)
+#                 successful += 1
+#             except UserIsBlocked:
+#                 await db.del_user(chat_id)
+#                 blocked += 1
+#             except InputUserDeactivated:
+#                 await db.del_user(chat_id)
+#                 deleted += 1
+#             except Exception as e:
+#                 print(f"Failed to send message to {chat_id}: {e}")
+#                 unsuccessful += 1
+#                 pass
+#             total += 1
+        
+#         status = f"""<b><u>Broadcast Completed</u></b>
+
+# <b>Total Users :</b> <code>{total}</code>
+# <b>Successful :</b> <code>{successful}</code>
+# <b>Blocked Users :</b> <code>{blocked}</code>
+# <b>Deleted Accounts :</b> <code>{deleted}</code>
+# <b>Unsuccessful :</b> <code>{unsuccessful}</code>"""
+        
+#         return await pls_wait.edit(status)
+
+#     else:
+#         msg = await message.reply(f"Use This Command As A Reply To Any Telegram Message Without Any Spaces.")
+#         await asyncio.sleep(8)
+#         await msg.delete()
 
 
 # @Bot.on_message(filters.command("broadcast") & filters.user(ADMINS) & filters.reply)
