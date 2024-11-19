@@ -46,9 +46,10 @@ class Database:
     async def full_userbase(self):
         user_docs = self.col.find({})
         user_ids = []
-        for doc in user_docs:
+        
+        async for doc in user_docs:  # Correctly iterating over the async cursor
             user_ids.append(doc['_id'])
-            
+        
         return user_ids
 
     async def del_user(self, user_id: int):
