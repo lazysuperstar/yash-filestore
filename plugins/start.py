@@ -189,7 +189,7 @@ async def get_users(client: Bot, message: Message):
         print(f"Error fetching user data: {e}")
         await msg.edit("❌ Failed to fetch user data. Please try again later.")
 
-@Bot.on_message(filters.private & filters.command('broadcast') & filters.user(ADMINS))
+@Bot.on_message(filters.private & filters.command('broadcast') & filters.user(ADMINS) & filters.reply)
 async def send_text(client: Bot, message: Message):
     if message.reply_to_message:
         print(f'Broadcast hit me')
