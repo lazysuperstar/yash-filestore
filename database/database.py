@@ -51,10 +51,10 @@ class Database:
             user_ids.append(doc['_id'])
         
         return user_ids
-
-    async def del_user(self, user_id: int):
-        self.col.delete_one({'_id': user_id})
-        return
+    
+    async def delete_user(self, user_id):
+        await self.col.delete_many({'_id': int(user_id)})
+    
     
     async def set_thumbnail(self, id, file_id):
         await self.col.update_one({'_id': int(id)}, {'$set': {'file_id': file_id}})
