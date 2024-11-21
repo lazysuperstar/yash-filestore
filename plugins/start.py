@@ -16,18 +16,21 @@ neha_delete_time = FILE_AUTO_DELETE
 neha = neha_delete_time
 file_auto_delete = humanize.naturaldelta(neha)
 
+from motor.motor_asyncio import AsyncIOMotorClient  
+Dbclient = AsyncIOMotorClient(DB_URI)
+Cluster = Dbclient['Cluster0']
+Data = Cluster['users']
+
+
 @Bot.on_message(filters.command('start') & filters.private)
 async def start_command(client: Client, message: Message):
     user = message.from_user
     # if not await db.is_user_exist(user.id):
     #     await db.add_user(user.id)
     id = message.from_user.id
-    if not await db.present_user(id):
-        try:
-            await db.add_user(id)
-        except Exception as e:
-            print(f"Error adding user: {e}")
-            pass
+    
+    if not await Data.find_one({'id': id}): await Data.insert_one({'id': id})
+
 
     if (FORCE_SUB_CHANNEL or FORCE_SUB_CHANNEL2 or FORCE_SUB_CHANNEL3) and not await is_subscribed(client, message):
         # User is not subscribed to any of the required channels, trigger force_sub logic
@@ -125,191 +128,107 @@ async def start_command(client: Client, message: Message):
         )
         return
 
-# @Bot.on_message(filters.command('start') & filters.private)
-# async def not_joined(client: Client, message: Message):
-#     try:
-#         invite_link = await client.create_chat_invite_link(int(FORCE_SUB_CHANNEL), creates_join_request=True)
-#         invite_link2 = await client.create_chat_invite_link(int(FORCE_SUB_CHANNEL2), creates_join_request=True)
-#         invite_link3 = await client.create_chat_invite_link(int(FORCE_SUB_CHANNEL3), creates_join_request=True)
-#     except ChatAdminRequired:
-#         logger.error("Hey Sona, Ek dfa check kr lo ki auth Channel mei Add hu ya nhi...!")
-#         return
-#     buttons = [
-#         [
-#             InlineKeyboardButton(text="ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ1", url=invite_link.invite_link),
-#             InlineKeyboardButton(text="ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ2", url=invite_link2.invite_link),
-#             InlineKeyboardButton(text="ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ3", url=invite_link3.invite_link),
-#         ]
-#     ]
-#     try:
-#         buttons.append(
-#             [
-#                 InlineKeyboardButton(
-#                     text='ʀᴇʟᴏᴀᴅ',
-#                     url=f"https://t.me/{client.username}?start={message.command[1]}"
-#                 )
-#             ]
-#         )
-#     except IndexError:
-#         pass
 
-#     await message.reply(
-#         text=FORCE_MSG.format(
-#             first=message.from_user.first_name,
-#             last=message.from_user.last_name,
-#             username=None if not message.from_user.username else '@' + message.from_user.username,
-#             mention=message.from_user.mention,
-#             id=message.from_user.id
-#         ),
-#         reply_markup=InlineKeyboardMarkup(buttons),
-#         quote=True,
-#         disable_web_page_preview=True
-#     )
+@Bot.on_message(filters.private & filters.command(["broadcast", "users"]) & filters.user(ADMINS))  
+async def broadcast(c, m):
+    if m.text == "/users":
+        total_users = await Data.count_documents({})
+        return await m.reply(f"Total Users: {total_users}")
+    b_msg = m.reply_to_message
+    sts = await m.reply_text("Broadcasting your messages...")
+    users = Data.find({})
+    total_users = await Data.count_documents({})
+    done = 0
+    failed = 0
+    success = 0
+    start_time = time.time()
+    async for user in users:
+        user_id = int(user['id'])
+        try:
+            await b_msg.copy(chat_id=user_id)
+            success += 1
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await b_msg.copy(chat_id=user_id)
+            success += 1
+        except InputUserDeactivated:
+            await Data.delete_many({'id': user_id})
+            failed += 1
+        except UserIsBlocked:
+            failed += 1
+        except PeerIdInvalid:
+            await Data.delete_many({'id': user_id})
+            failed += 1
+        except Exception as e:
+            failed += 1
+        done += 1
+        if not done % 20:
+            await sts.edit(f"Broadcast in progress:\n\nTotal Users {total_users}\nCompleted: {done} / {total_users}\nSuccess: {success}\nFailed: {failed}")    
+    time_taken = datetime.timedelta(seconds=int(time.time()-start_time))
+    await sts.delete()
+    await m.reply_text(f"Broadcast Completed:\nCompleted in {time_taken} seconds.\n\nTotal Users {total_users}\nCompleted: {done} / {total_users}\nSuccess: {success}\nFailed: {failed}", quote=True)
 
-# @Bot.on_message(filters.command('users') & filters.private & filters.user(ADMINS))
-# async def get_users(client: Bot, message: Message):
-#     msg = await client.send_message(chat_id=message.chat.id, text=f"Processing...")
 
-#     users = await db.full_userbase()
-#     await msg.edit(f"{len(users)} Users Are Using This Bot")
+@Bot.on_message(filters.private & (filters.document | filters.video | filters.audio) & ~filters.command(['start','users','broadcast','batch','genlink','stats']))
+async def channel_post(client: Client, message: Message):
+    # user = message.from_user
+    # if not await db.is_user_exist(user.id):
+    #     await db.add_user(user.id) 
+    id = message.from_user.id
+    
+    if not await Data.find_one({'id': id}): await Data.insert_one({'id': id})
 
-@Bot.on_message(filters.command('users') & filters.private & filters.user(ADMINS))
-async def get_users(client: Bot, message: Message):
-    msg = await client.send_message(chat_id=message.chat.id, text="Processing...")
 
+    if (FORCE_SUB_CHANNEL or FORCE_SUB_CHANNEL2 or FORCE_SUB_CHANNEL3) and not await is_subscribed(client, message):
+        # User is not subscribed to any of the required channels, trigger force_sub logic
+        return await lazy_force_sub(client, message)
+
+    reply_text = await message.reply_text("Please Wait...!", quote = True)
     try:
-        # Fetch all user IDs from the database
-        users = await db.full_userbase()
-        user_count = len(users)
-
-        # Update the message with the count
-        await msg.edit(f"✅ {user_count} Users Are Using This Bot")
+        post_message = await message.copy(chat_id = client.db_channel.id, disable_notification=True)
+    except FloodWait as e:
+        await asyncio.sleep(e.x)
+        post_message = await message.copy(chat_id = client.db_channel.id, disable_notification=True)
     except Exception as e:
-        # Handle potential errors
-        print(f"Error fetching user data: {e}")
-        await msg.edit("❌ Failed to fetch user data. Please try again later.")
+        print(e)
+        await reply_text.edit_text("Something went Wrong..!")
+        return
+    converted_id = post_message.id * abs(client.db_channel.id)
+    string = f"get-{converted_id}"
+    base64_string = await encode(string)
+    link = f"https://t.me/{client.username}?start={base64_string}"
 
-@Bot.on_message(filters.private & filters.command('broadcast') & filters.user(ADMINS) & filters.reply)
-async def send_text(client: Bot, message: Message):
-    if message.reply_to_message:
-        print(f'Broadcast hit me')
-        query = await db.full_userbase()
-        broadcast_msg = message.reply_to_message
-        total, successful, blocked, deleted, unsuccessful = 0, 0, 0, 0, 0
+    reply_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔁 Share URL", url=f'https://telegram.me/share/url?url={link}')],
+        [InlineKeyboardButton("🚀 Rename", callback_data='rename')]
+        ])
 
-        pls_wait = await message.reply("<i>Broadcasting Message... This will Take Some Time</i>")
-        
-        for chat_id in query:
-            try:
-                await broadcast_msg.copy(chat_id)
-                successful += 1
-            except FloodWait as e:
-                await asyncio.sleep(e.x)
-                await broadcast_msg.copy(chat_id)
-                successful += 1
-            except UserIsBlocked:
-                await db.del_user(chat_id)
-                blocked += 1
-            except InputUserDeactivated:
-                await db.del_user(chat_id)
-                deleted += 1
-            except Exception as e:
-                print(f"Failed to send message to {chat_id}: {e}")
-                unsuccessful += 1
-            total += 1
+    await reply_text.edit(f"<b>Here is your link</b>\n\n{link}", reply_markup=reply_markup, disable_web_page_preview = True)
 
-            # Periodic update every 100 messages
-            if total % 100 == 0:
-                await pls_wait.edit(f"<i>Broadcasting...</i>\n\n<b>Total Processed:</b> <code>{total}</code>")
+    if not DISABLE_CHANNEL_BUTTON:
+        await post_message.edit_reply_markup(reply_markup)
 
-        status = f"""<b><u>Broadcast Completed</u></b>
+@Bot.on_message(filters.channel & filters.incoming & filters.chat(CHANNEL_ID))
+async def new_post(client: Client, message: Message):
 
-<b>Total Users :</b> <code>{total}</code>
-<b>Successful :</b> <code>{successful}</code>
-<b>Blocked Users :</b> <code>{blocked}</code>
-<b>Deleted Accounts :</b> <code>{deleted}</code>
-<b>Unsuccessful :</b> <code>{unsuccessful}</code>"""
-        
-        return await pls_wait.edit(status)
+    if DISABLE_CHANNEL_BUTTON:
+        return
 
-    else:
-        msg = await message.reply("Use this command as a reply to any Telegram message.")
-        await asyncio.sleep(8)
-        await msg.delete()
+    converted_id = message.id * abs(client.db_channel.id)
+    string = f"get-{converted_id}"
+    base64_string = await encode(string)
+    link = f"https://t.me/{client.username}?start={base64_string}"
+    reply_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔁 Share URL", url=f'https://telegram.me/share/url?url={link}')],
+        [InlineKeyboardButton("🚀 Rename", callback_data="rename")]
+        ])
+    try:
+        await message.edit_reply_markup(reply_markup)
+    except Exception as e:
+        print(e)
+        pass
 
-
-# @Bot.on_message(filters.private & filters.command('broadcast') & filters.user(ADMINS))
-# async def send_text(client: Bot, message: Message):
-#     if message.reply_to_message:
-#         query = await db.full_userbase()
-#         broadcast_msg = message.reply_to_message
-#         total = 0
-#         successful = 0
-#         blocked = 0
-#         deleted = 0
-#         unsuccessful = 0
-        
-#         pls_wait = await message.reply("<i>Broadcasting Message.. This will Take Some Time</i>")
-#         for chat_id in query:
-#             try:
-#                 await broadcast_msg.copy(chat_id)
-#                 successful += 1
-#             except FloodWait as e:
-#                 await asyncio.sleep(e.x)
-#                 await broadcast_msg.copy(chat_id)
-#                 successful += 1
-#             except UserIsBlocked:
-#                 await db.del_user(chat_id)
-#                 blocked += 1
-#             except InputUserDeactivated:
-#                 await db.del_user(chat_id)
-#                 deleted += 1
-#             except Exception as e:
-#                 print(f"Failed to send message to {chat_id}: {e}")
-#                 unsuccessful += 1
-#                 pass
-#             total += 1
-        
-#         status = f"""<b><u>Broadcast Completed</u></b>
-
-# <b>Total Users :</b> <code>{total}</code>
-# <b>Successful :</b> <code>{successful}</code>
-# <b>Blocked Users :</b> <code>{blocked}</code>
-# <b>Deleted Accounts :</b> <code>{deleted}</code>
-# <b>Unsuccessful :</b> <code>{unsuccessful}</code>"""
-        
-#         return await pls_wait.edit(status)
-
-#     else:
-#         msg = await message.reply(f"Use This Command As A Reply To Any Telegram Message Without Any Spaces.")
-#         await asyncio.sleep(8)
-#         await msg.delete()
-
-
-# @Bot.on_message(filters.command("broadcast") & filters.user(ADMINS) & filters.reply)
-# async def broadcast_handler(bot: Client, m: Message):
-#     all_users = await db.get_all_users()
-#     broadcast_msg = m.reply_to_message
-#     sts_msg = await m.reply_text("broadcast started !") 
-#     done = 0
-#     failed = 0
-#     success = 0
-#     start_time = time.time()
-#     total_users = await db.total_users_count()
-#     async for user in all_users:
-#         sts = await send_msg(user['_id'], broadcast_msg)
-#         if sts == 200:
-#            success += 1
-#         else:
-#            failed += 1
-#         if sts == 400:
-#            await db.delete_user(user['_id'])
-#         done += 1
-#         if not done % 20:
-#            await sts_msg.edit(f"Broadcast in progress:\nTotal Users {total_users}\nCompleted: {done} / {total_users}\nSuccess: {success}\nFailed: {failed}")
-#     completed_in = datetime.timedelta(seconds=int(time.time() - start_time))
-#     await sts_msg.edit(f"Broadcast Completed:\nCompleted in `{completed_in}`.\n\nTotal Users {total_users}\nCompleted: {done} / {total_users}\nSuccess: {success}\nFailed: {failed}")
-           
+         
 async def send_msg(user_id, message):
     try:
         await message.copy(chat_id=int(user_id))
